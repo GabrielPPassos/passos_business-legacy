@@ -1,4 +1,4 @@
-# Fivem Script: Business Expansion
+# Fivem Script: Business
 
 ## Overview
 
