@@ -315,6 +315,11 @@ function Passos.openBusiness()
 								return
 							end
 
+							if tonumber(valor) > 500000 then
+								Notify(player, "negado", "Você só pode sacar até 500.000 reais.")
+								return
+							end
+
 							vRP.giveBankMoney(user_id, tonumber(valor))
 							vRP.execute("vRP/rem_capital", { user_id = user_id, capital = tonumber(valor) })
 							Notify(player, "sucesso", "Você sacou <b>R$ ".. vRP.format(tonumber(valor)) ..",00</b>.")
