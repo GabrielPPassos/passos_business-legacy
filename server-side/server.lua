@@ -16,12 +16,15 @@ vRP.prepare("vRP/delete_business", "DELETE FROM vrp_user_business WHERE user_id 
 vRP.prepare("vRP/get_business", "SELECT * FROM vrp_user_business WHERE user_id = @user_id")
 vRP.prepare("vRP/get_users", "SELECT * FROM vrp_user_business")
 vRP.prepare("vRP/add_capital", "UPDATE vrp_user_business SET capital = capital + @capital WHERE user_id = @user_id")
+vRP.prepare("vRP/rem_capital", "UPDATE vrp_user_business SET capital = capital - @capital WHERE user_id = @user_id")
 vRP.prepare("vRP/set_capital", "UPDATE vrp_user_business SET capital = @capital WHERE user_id = @user_id")
 vRP.prepare("vRP/add_laundered", "UPDATE vrp_user_business SET laundered = laundered + @laundered WHERE user_id = @user_id")
 vRP.prepare("vRP/get_business_page", "SELECT user_id,name,description,capital,capital_trancada,taxa_de_crescimento FROM vrp_user_business ORDER BY capital DESC LIMIT @b,@n")
 vRP.prepare("vRP/reset_transfer", "UPDATE vrp_user_business SET laundered = 0, reset_timestamp = @time WHERE user_id = @user_id")
 vRP.prepare("vRP/update_capital_trancada", "UPDATE vrp_user_business SET capital_trancada = @capital_trancada WHERE user_id = @user_id")
 vRP.prepare("vRP/upgrade_taxa", "UPDATE vrp_user_business SET taxa_de_crescimento = taxa_de_crescimento + 1 WHERE user_id = @user_id")
+
+local CooldownSaque = {}
 -----------------------------------------------------------------------------------------------------------------------------------------
 -- Funções
 -----------------------------------------------------------------------------------------------------------------------------------------
@@ -147,6 +150,10 @@ function Passos.openBusiness()
 			business.name = cfg.ServerName .."'s Business"
 			business["Abrir uma Empresa"] = {function(player, choice)
 				local capital_inicial = vRP.prompt(player, "Qual é o capital inicial que você quer aplicar na sua empresa? (Mínimo: ".. vRP.format(tonumber(cfg.CapitalMinimo))..",00 reais)", cfg.CapitalMinimo)
+				if capital_inicial == "" or capital_inicial == nil then
+					Notify(player, "negado", "A quantidade inserida é inválida.")
+					return 
+				end
 				if tonumber(capital_inicial) > 0 then
 					if tonumber(capital_inicial) >= tonumber(cfg.CapitalMinimo) then
 						local nome_empresa = vRP.prompt(player, "Qual é o nome que você deseja colocar na sua empresa? (Isso é imutável).", "")
@@ -176,6 +183,10 @@ function Passos.openBusiness()
 			business["Adicionar Capital"] = {function(player, choice)
 				if user_business.capital_trancada == 0 then
 					local valor = vRP.prompt(player, "Quantos reais você quer adicionar?", "")
+					if valor == "" or valor == nil then
+						Notify(player, "negado", "A quantidade inserida é inválida.")
+						return 
+					end
 					if tonumber(valor) > 0 then
 						if vRP.tryPayment(user_id, tonumber(valor)) then
 							vRP.execute("vRP/add_capital", { user_id = user_id, capital = tonumber(valor) })
@@ -250,6 +261,10 @@ function Passos.openBusiness()
 			business["Lavar Dinheiro"] = {function(player, choice)
 				if user_business.capital_trancada == 0 then
 					local valor = vRP.prompt(player, "Quantos reais você quer lavar?", "")
+					if valor == "" or valor == nil then
+						Notify(player, "negado", "A quantidade inserida é inválida.")
+						return 
+					end
 					if tonumber(valor) > 0 then
 						local dinheiroSujo = vRP.getInventoryItemAmount(user_id, "dinheirosujo")
 						if tonumber(dinheiroSujo) >= tonumber(valor) then
@@ -286,6 +301,41 @@ function Passos.openBusiness()
 					Notify(player, "negado", "O seu capital foi trancado pela <b>Polícia Civil</b>. Sua empresa está passando por investigações.")
 				end
 			end, "Lave dinheiro com a sua empresa e lucre muito mais."}
+			business["Sacar Capital"] = {function(player, choice)
+				if user_business.capital_trancada == 0 then
+					local valor = vRP.prompt(player, "Quantos reais você quer sacar do seu capital?", "")
+					if valor == "" or valor == nil then
+						Notify(player, "negado", "A quantidade inserida é inválida.")
+						return 
+					end
+					if tonumber(valor) > 0 then
+						if tonumber(user_business.capital) >= tonumber(valor) then
+							if tonumber(CooldownSaque[user_id]) > 0 then
+								Notify(player, "negado", "Você precisa esperar <b>".. CooldownSaque[user_id] .." minutos</b> para sacar novamente.")
+								return
+							end
+
+							vRP.giveBankMoney(user_id, tonumber(valor))
+							vRP.execute("vRP/rem_capital", { user_id = user_id, capital = tonumber(valor) })
+							Notify(player, "sucesso", "Você sacou <b>R$ ".. vRP.format(tonumber(valor)) ..",00</b>.")
+							CooldownSaque[user_id] = 30
+							
+							Wait(1200)
+
+							if (tonumber(user_business.capital) - tonumber(valor)) < cfg.CapitalMinimo then
+								vRP.execute("vRP/update_capital_trancada", { user_id = user_id, capital_trancada = 1 })
+								Notify(player, "negado", "O saldo do seu capital ficou menor que o mínimo estabelecido pela <b>Receita Federal</b>. Agora, você precisará pedir para que a polícia destranque a sua empresa.")
+							end
+						else
+							Notify(player, "negado", "Você não tem essa quantidade de <b>capital aplicado</b>.")
+						end
+					else
+						Notify(player, "negado", "A quantidade inserida é inválida.")
+					end
+				else
+					Notify(player, "negado", "O seu capital foi trancado pela <b>Polícia Civil</b>. Sua empresa está passando por investigações.")
+				end
+			end, "Saque um valor do seu capital. Mas, fique atento, você só tem permissão de sacar até 500.000 reais, a cada 30 minutos, e se o capital ficar menor que o mínimo estabelecido, a sua empresa será trancada e só será liberada com autorização policial."}
 		end
 
 		if vRP.hasPermission(user_id, cfg.PolicePermission) then
@@ -322,5 +372,16 @@ Citizen.CreateThread(function()
 	while true do
 		Passos.updateCapital()
 		Citizen.Wait(cfg.CapitalUpdate)
+	end
+end)
+
+Citizen.CreateThread(function()
+	while true do
+		for k,v in pairs(CooldownSaque) do
+			if CooldownSaque[k] > 0 then
+				CooldownSaque[k] = CooldownSaque[k] - 1
+			end
+		end
+		Citizen.Wait(30*60000)
 	end
 end)
