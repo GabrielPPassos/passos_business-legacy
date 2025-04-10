@@ -1,4 +1,4 @@
-# Fivem Script: Business
+# Fivem Script: Business (Legacy Code)
 
 ## Overview
 
